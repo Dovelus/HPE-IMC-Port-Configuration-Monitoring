@@ -17,5 +17,5 @@ https://github.com/Dovelus/HPE-IMC-Port-Configuration-Monitoring/blob/52a7d49498
 
 
 ## Usage:
-       python  HPE_IMC_monitoring.py -v True (Verbose mode on)
-	python  HPE_IMC_monitoring.py (Verbose mode off)
+python  HPE_IMC_monitoring.py -v True (Verbose mode on)
+python  HPE_IMC_monitoring.py (Verbose mode off)
