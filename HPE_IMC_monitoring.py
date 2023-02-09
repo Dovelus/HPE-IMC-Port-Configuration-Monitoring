@@ -1,29 +1,41 @@
 # Import necessary libraries
+import requests.exceptions
 from pyhpeimc.auth import IMCAuth
 from pyhpeimc.plat.device import *
 import io
 import re
+import os
 import smtplib
 from datetime import datetime
 import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from dotenv import dotenv_values
+import zipfile
+import argparse
 
-data = []
+argParser = argparse.ArgumentParser()
+argParser.add_argument("-v", "--verbose", required=False, type=bool, help="python script.py -v True/Flase")
+args = argParser.parse_args()
+print(args.verbose)
+variables = dotenv_values(".env")
+
+zip_arr = []
 
 # Global varibles for the code (Change Here for personalizzation
-IMC_HOSTNAME = "localhost"
-IMC_PROTOCOL = "http"
-IMC_PORT = "8080"
-IMC_USERNAME = "username"
-IMC_PASSWORD = "password"
+IMC_HOSTNAME = variables["IMC_HOSTNAME"]
+IMC_PROTOCOL = variables["IMC_PROTOCOL"]
+IMC_PORT = variables["IMC_PORT"]
+IMC_USERNAME = variables["IMC_USERNAME"]
+IMC_PASSWORD = variables["IMC_PASSWORD"]
 
-SMTP_SERVER = "localhost"
-SMTP_SENDER = "test@test.com"
-SMTP_RECIPIENT = "papercut@papercut.com"
-SMTP_SUBJECT = "Mismatched Switch Ports"
+SMTP_SERVER = variables["SMTP_SERVER"]
+SMTP_SENDER = variables["SMTP_SENDER"]
+SMTP_RECIPIENT = variables["SMTP_RECIPIENT"]
+SMTP_SUBJECT = variables["SMTP_SUBJECT"]
 
-LOG_FILE = "IMCMonitoring.log"
+LOG_FILE = variables["LOG_FILE"]
 
 
 # Strip all blank spaces for utility puposes
@@ -38,7 +50,7 @@ def compare_dicts(dictarr):
         for s in range(len(dictarr)):
             for i, (interface, configuration) in enumerate(dictarr[0].items()):
                 if list(dictarr[s+1].values())[i] != configuration:
-                    mismatches_local[list(dictarr[s+1])[i]] = list(dictarr[s+1].values())[i]
+                    mismatches_local[list(dictarr[s+1])[i]] = list(set(list(dictarr[s + 1].values())[i]) ^ set(configuration))
     except IndexError:
         pass
     return mismatches_local
@@ -48,40 +60,47 @@ def compare_dicts(dictarr):
 # dictionary for scalbility purposes
 def switch_separator(r_configuration: dict):
     local_arr = []
-    for r in range(1, int(re.sub(r'\D', '', str(list(r_configuration)[-1]))[0])+1):
-        local_dict = {}
-        for interface, configuration in r_configuration.items():
-            if f'interface Ten-GigabitEthernet{r}/0' in interface or f'interface GigabitEthernet{r}/0' in interface:
-                local_dict[interface] = configuration
-        local_arr.append(local_dict)
+    try:
+        for r in range(1, int(re.sub(r'\D', '', str(list(r_configuration)[-1]))[0])+1):
+            local_dict = {}
+            for interface, configuration in r_configuration.items():
+                if f'interface Ten-GigabitEthernet{r}/0' in interface or f'interface GigabitEthernet{r}/0' in interface:
+                    local_dict[interface] = configuration
+            local_arr.append(local_dict)
+    except IndexError:
+        pass
     return compare_dicts(local_arr)
 
 
 # Helper function to send an email notification
-def send_email(sender, recipient, subject):
+def send_email(sender, recipient, subject, error_handler: str):
     # Create the email message
     message = MIMEMultipart()
     message['Subject'] = subject
     message['From'] = sender
     message['To'] = recipient
     # Condition for preventing empty emails
-    if not data == []:
+    if not zip_arr == []:
         content = f"Check the Interfaces with the first Switch in the stack\nDate of Execution: {datetime.now()}\n"
         text = MIMEText(content)
         message.attach(text)
-        # Convert the list to a json string
-        json_data = json.dumps(data, indent=2)
-        # Attach the json file
-        json_file = MIMEText(json_data, _subtype='json')
-        json_file.add_header('Content-Disposition', 'attachment', filename='report.json')
-        message.attach(json_file)
+        with open("zipfile.zip", 'rb') as file:
+            # Attach the file with filename to the email
+            message.attach(MIMEApplication(file.read(), Name='report.zip'))
 
         # Send the email
         smtp_server = smtplib.SMTP(SMTP_SERVER)
         smtp_server.send_message(message)
         smtp_server.quit()
+    elif error_handler == "Error":
+        content = f"ERROR IN EXECUTION\nDate of Execution: {datetime.now()}\n"
+        text = MIMEText(content)
+        message.attach(text)
+        smtp_server = smtplib.SMTP(SMTP_SERVER)
+        smtp_server.send_message(message)
+        smtp_server.quit()
     else:
-        content = f"NO MISMATCHES FOUND\nDate of Execution: {datetime.now()}\n"
+        content = f"NO MISMATECHS FOUND\nDate of Execution: {datetime.now()}\n"
         text = MIMEText(content)
         message.attach(text)
         smtp_server = smtplib.SMTP(SMTP_SERVER)
@@ -95,32 +114,49 @@ def add_wrong_interface(host,  issues):
         "Host": host,
         "Wrong Interfaces": issues
     }
-    data.append(report)
-    return data
+    return report
+
+
+def create_json_file(data, name):
+    file_name = f"{name}.json"
+    json_file = io.StringIO()
+    json.dump(data, json_file, indent=4)
+    return file_name, json_file
+
+
+def create_zip_file(file_names_and_objects):
+    zip_file = io.BytesIO()
+    with zipfile.ZipFile(zip_file, "w") as zf:
+        for file_name, file_obj in file_names_and_objects:
+            zf.writestr(file_name, file_obj.getvalue())
+    return zip_file
 
 
 # Helper function to write log file
 def log_writer(mismathes, host=None):
     with open(LOG_FILE, "a") as log:
-        if mismathes != "No Findings to Report":
-            log.write(f"[{datetime.now()}]  Address : {host} Wrong Interfaces : {mismathes if mismathes != [] else None}\n")
+        if mismathes != "No Findings to Report" and mismathes != "Error":
+            log.write(f"[{datetime.now()}] [SUCCESS] Address : {host} Wrong Interfaces : {mismathes if mismathes != [] else None}\n")
+        elif mismathes == "No Findings to Report":
+            log.write(f"[{datetime.now()}] [INFO] Message: {mismathes}\n")
         else:
-            log.write(f"[{datetime.now()}]  Message: {mismathes}\n")
+            log.write(f"[{datetime.now()}] [ERROR] IMCError \n")
 
 
 def main():
     # Authenticate with the HPE IMC server
-    auth = IMCAuth(f"{IMC_PROTOCOL}://", IMC_HOSTNAME, IMC_PORT, IMC_USERNAME, IMC_PASSWORD)
-    devices = get_all_devs(auth, f"{IMC_PROTOCOL}://{IMC_HOSTNAME}:{IMC_PORT}")
-    with open("file.txt", "r") as file:
-        file = file.readlines()
-        for device in devices:
-            if device['devCategoryImgSrc'] == "switch":
-                for host in file:
-                    # Check if the location corrisponds to one in the file and ingore any device with bl in the label
-                    if host.strip("\n") in str(device['location']).lower() and "bl" not in str(device['label']).lower():
-                        config = get_dev_run_config(auth, f"{IMC_PROTOCOL}://{IMC_HOSTNAME}:{IMC_PORT}",
-                                                    devip=str(device['ip']))
+    try:
+        auth = IMCAuth(f"{IMC_PROTOCOL}://", IMC_HOSTNAME, IMC_PORT, IMC_USERNAME, IMC_PASSWORD)
+        devices = get_all_devs(auth, f"{IMC_PROTOCOL}://{IMC_HOSTNAME}:{IMC_PORT}")
+        with open("exclusion.txt", "r") as file:
+            file = file.readlines()
+            for device in devices:
+                #for host in file:
+                    if device['devCategoryImgSrc'] == "switch" and str(device['label']+"\n") not in file:
+                        # Check if the location corrisponds to one in the file and ingore any device with bl in the label
+                        if args.verbose:
+                            print(f"{datetime.now()} | {str(device['label'])}")
+                        config = get_dev_run_config(auth, f"{IMC_PROTOCOL}://{IMC_HOSTNAME}:{IMC_PORT}", devip=str(device['ip']))
 
                         # Remove blank lines from the device configuration
                         config = strip_blank_lines(config)
@@ -150,14 +186,23 @@ def main():
                                     config_dict[current_key].append(line)
                         # Checks if the dictionary is not empty to reduce loop times
                         if switch_separator(config_dict) != {}:
-                            add_wrong_interface(device['ip'], switch_separator(config_dict))
+                            file_name, json_file = create_json_file(add_wrong_interface(device['ip'], switch_separator(config_dict)), device["label"])
+                            zip_arr.append((file_name, json_file))
+                            #print(config_dict)
                             log_writer(switch_separator(config_dict), device['ip'])
-    # Checks if the data array is empty in case the configuration are all correct for the current pool
-    if not data == []:
-        send_email(SMTP_SENDER, SMTP_RECIPIENT, SMTP_SUBJECT)
-    else:
-        log_writer(mismathes="No Findings to Report\n")
-        send_email(SMTP_SENDER, SMTP_RECIPIENT, SMTP_SUBJECT)
+        # Checks if the data array is empty in case the configuration are all correct for the current pool
+        if not zip_arr == []:
+            zip_file = create_zip_file(zip_arr)
+            with open("zipfile.zip", "wb") as f:
+                f.write(zip_file.getvalue())
+            send_email(SMTP_SENDER, SMTP_RECIPIENT, SMTP_SUBJECT, error_handler="")
+            os.remove("zipfile.zip")
+        else:
+            log_writer(mismathes="No Findings to Report\n")
+            send_email(SMTP_SENDER, SMTP_RECIPIENT, SMTP_SUBJECT, error_handler="")
+    except requests.exceptions.ConnectTimeout:
+        log_writer(mismathes="Error")
+        send_email(SMTP_SENDER, SMTP_RECIPIENT, SMTP_SUBJECT, error_handler="Error")
 
 
 if __name__ == "__main__":
