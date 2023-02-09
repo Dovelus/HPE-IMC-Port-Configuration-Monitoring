@@ -14,4 +14,8 @@ https://github.com/Dovelus/HPE-IMC-Port-Configuration-Monitoring/blob/52a7d49498
 
 ### The exclusion.txt file is the list of devices to ignore based on their label
 
- 
+
+
+## Usage:
+        python  HPE_IMC_monitoring.py -v True (Verbose mode on)
+		python  HPE_IMC_monitoring.py (Verbose mode off)
