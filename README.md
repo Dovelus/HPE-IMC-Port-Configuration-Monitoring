@@ -8,10 +8,10 @@ Monitoring script for HPE IMC to check if HA switch stack is configured correctl
 
 This will install all the required libraries
 
-Remenber to change the following lines to your settings
+Remenber to create a .env file with the varibles valus with the following names
 
-https://github.com/Dovelus/HPE-IMC-Port-Configuration-Monitoring/blob/5ebb4845aebe5fc990d4749bf515ae1dc9fee8df/HPE_IMC_monitoring.py#L15-L26
+https://github.com/Dovelus/HPE-IMC-Port-Configuration-Monitoring/blob/52a7d49498ce3bfde67d7083c9a9343f269a5190/HPE_IMC_monitoring.py#L27-L38
 
-The file.txt is the list of monitoring devices that uses that location as key to check in my case you'll see that i excluded all devices that has "BL" in the name you can remove that if you want 
+The exclusion.txt is the list of devices to ignore:
 line: https://github.com/Dovelus/HPE-IMC-Port-Configuration-Monitoring/blob/cc1a95f5d8134a3b1d7024fc136de9a5edee1a42/HPE_IMC_monitoring.py#L121
  
